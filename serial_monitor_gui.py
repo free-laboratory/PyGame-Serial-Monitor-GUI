@@ -2,6 +2,7 @@ import pygame
 import pygame_gui
 from collections import deque
 import random
+import time
 
 import serial
 import serial.tools.list_ports
@@ -279,7 +280,8 @@ class OptionsUIApp:
                 numBytesToRead = gvar_ctrl.mcu_serial_object.in_waiting
                 if(numBytesToRead > 0):
                     line_readed = gvar_ctrl.mcu_serial_object.readline()
-                    serial_log_file.write(str(line_readed)+'\n')
+                    ms_rightnow = int(round(time.time() * 1000))
+                    serial_log_file.write(str(ms_rightnow) + ", " + str(line_readed)+'\n')
                     if enable_serial_monitor == 1: # in app option
                         serial_msg_text += (str(line_readed)+'\n')
                         self.serial_msg_disp.appended_text += (str(line_readed)+'\n')

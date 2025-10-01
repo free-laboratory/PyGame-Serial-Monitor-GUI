@@ -1,0 +1,1 @@
+gvar_manager = None
