@@ -7,18 +7,18 @@ import numpy as np
 import copy
 from typing import Dict
 
-def create_canmsg_pressure_to_actuator(actuator_id, pressure_value):
+def create_canmsg_pressure_to_actuator(actuator_id, p, pdot):
     # Convert the float pressure value to 4 bytes
-    pressure_bytes = map_pressure_to_4bytes(pressure_value)
+    pressure_bytes = map_pressure_to_4bytes(p, pdot)
     
     # Create a CAN message with the actuator ID and pressure bytes
     return create_can_message(actuator_id, pressure_bytes)
     
-def map_pressure_to_4bytes(value_uint32_t):
-    b1 = value_uint32_t & 0x000000FF
-    b2 = (value_uint32_t & 0x0000FF00) >> 8
-    b3 = (value_uint32_t & 0x00FF0000) >> 16
-    b4 = (value_uint32_t & 0xFF000000) >> 24
+def map_pressure_to_4bytes(p, pdot):
+    b1 = p & 0x000000FF
+    b2 = (p & 0x0000FF00) >> 8
+    b3 = (pdot & 0x00FF0000) >> 16
+    b4 = (pdot & 0xFF000000) >> 24
     return [b1, b2, b3, b4]
 
 def map_pressure_from_4bytes(byte_list):
@@ -53,17 +53,17 @@ def prompt_user_for_pressure():
 def subroutine_send_can_messages(send_parent_conns):
     try:
         time.sleep(2)
-        pressure_value = 0xFFFFFFFF
+        p_dot_val = 0xFFFFFFFF
         counter_value = 0x0000
         while True:
             counter_value += 1
             if counter_value > 0xFFFF:
                 counter_value = 0x0000
 
-            pressure_value = counter_value << 16
+            p_dot_val = counter_value << 16
 
 
-            canmsg = create_canmsg_pressure_to_actuator(actuator_id=0x123, pressure_value=pressure_value)
+            canmsg = create_canmsg_pressure_to_actuator(actuator_id=0x123, p=200, pdot=p_dot_val)
             send_parent_conns.send(canmsg)
             time.sleep(0.001)
     except Exception as e:
@@ -115,27 +115,17 @@ def subroutine_CAN_handler(send_child_conn):
         p_dot_sent_prev = 0
 
         print_time = time.time()
-        
-        pressure_value = 0xFFFFFFFF
+
+        p_value = 200
+        pdot_value = 0xFFFFFFFF
         counter_value = 0x0000
 
         while True:
-            # # if there is a message to send
-            # if send_child_conn.poll():
-            #     message_to_send = send_child_conn.recv()
-            #     try:
-            #         bus.send(message_to_send)
-            #         v1_sent, v2_sent = map_pressure_from_4bytes(message_to_send.data)
-
-            #         # print(f"Sent CAN message: {message_to_send}")
-            #     except can.CanError as e:
-            #         print(f"Error sending CAN message: {e}")
-
             counter_value += 1
             if counter_value > 0xFFFF:
                 counter_value = 0x0000
 
-            pressure_value = counter_value << 16
+            pdot_value = counter_value << 16
 
             for i in range(24):
                 if i == 0:
@@ -143,7 +133,7 @@ def subroutine_CAN_handler(send_child_conn):
                 else:
                     aid = 0x124
 
-                canmsg = create_canmsg_pressure_to_actuator(actuator_id=aid, pressure_value=pressure_value)
+                canmsg = create_canmsg_pressure_to_actuator(actuator_id=aid, p=p_value, pdot=pdot_value)
                 bus.send(canmsg)
                 p_sent, p_dot_sent = map_pressure_from_4bytes(canmsg.data)
 
@@ -153,7 +143,7 @@ def subroutine_CAN_handler(send_child_conn):
                     p_val = vema_listener.actuator_pressures.get(aid, 0)
                     pdot_val = vema_listener.actuator_pressure_dots.get(aid, 0)
                     
-                    print(hex(aid), p_val, hex(pdot_val), hex(p_dot_sent), p_dot_sent - p_dot_sent_prev)
+                    print(hex(aid), p_val, p_sent, hex(pdot_val), hex(p_dot_sent), p_dot_sent - p_dot_sent_prev)
                     p_dot_sent_prev = p_dot_sent
 
                     print_time = time.time()
