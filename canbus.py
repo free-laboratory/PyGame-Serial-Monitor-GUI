@@ -17,8 +17,8 @@ def create_canmsg_pressure_to_actuator(actuator_id, p, pdot):
 def map_pressure_to_4bytes(p, pdot):
     b1 = p & 0x000000FF
     b2 = (p & 0x0000FF00) >> 8
-    b3 = (pdot & 0x00FF0000) >> 16
-    b4 = (pdot & 0xFF000000) >> 24
+    b3 = (pdot & 0x00FF)
+    b4 = (pdot & 0xFF00) >> 8
     return [b1, b2, b3, b4]
 
 def map_pressure_from_4bytes(byte_list):
@@ -47,27 +47,6 @@ def prompt_user_for_pressure():
             return pressure
         except ValueError:
             print("Invalid input. Please enter a valid float number.")
-
-
-
-def subroutine_send_can_messages(send_parent_conns):
-    try:
-        time.sleep(2)
-        p_dot_val = 0xFFFFFFFF
-        counter_value = 0x0000
-        while True:
-            counter_value += 1
-            if counter_value > 0xFFFF:
-                counter_value = 0x0000
-
-            p_dot_val = counter_value << 16
-
-
-            canmsg = create_canmsg_pressure_to_actuator(actuator_id=0x123, p=200, pdot=p_dot_val)
-            send_parent_conns.send(canmsg)
-            time.sleep(0.001)
-    except Exception as e:
-        print(f"Error in sending CAN messages: {e}")
 
 
 # Define a custom listener class
@@ -116,22 +95,28 @@ def subroutine_CAN_handler(send_child_conn):
 
         print_time = time.time()
 
-        p_value = 200
-        pdot_value = 0xFFFFFFFF
-        counter_value = 0x0000
+        p_value = 1300
+        pdot_value = 0xAAAA
+        # counter_value = 0x0000
 
         while True:
-            counter_value += 1
-            if counter_value > 0xFFFF:
-                counter_value = 0x0000
+            # counter_value += 1
+            # if counter_value > 0xFFFF:
+            #     counter_value = 0x0000
 
-            pdot_value = counter_value << 16
+            # pdot_value = counter_value << 16
 
             for i in range(24):
                 if i == 0:
                     aid = 0x123
                 else:
                     aid = 0x124
+
+                if send_child_conn.poll():
+                    [p_value, pdot_value] = send_child_conn.recv()
+                p_value = int(p_value)
+                pdot_value = int(pdot_value)
+
 
                 canmsg = create_canmsg_pressure_to_actuator(actuator_id=aid, p=p_value, pdot=pdot_value)
                 bus.send(canmsg)
@@ -155,7 +140,7 @@ def subroutine_CAN_handler(send_child_conn):
 
     pass
 
-def console():
+def console(send_parent_conn):
     quit_all = False
     try:
         while not quit_all:
@@ -169,6 +154,16 @@ def console():
                     if c1 == 'q':
                         quit_all = True
                         pass
+                    elif c1 == 'b':
+                        gvar_can.target_pressure = int(args[0])
+                        send_parent_conn.send([gvar_can.target_pressure, gvar_can.target_pdot])
+                    elif c1 == 'd':
+                        pdot1 = int(args[0])
+                        pdot2 = int(args[1])
+                        print(pdot1, pdot2)
+                        gvar_can.target_pdot = (pdot1 & 0x00FF) | ((pdot2 << 8) & 0xFF00)
+
+                        send_parent_conn.send([gvar_can.target_pressure, gvar_can.target_pdot]) 
                     elif c1 == 'p':
                         print("here")
                         pass
@@ -196,18 +191,14 @@ if __name__ == "__main__":
     try:
             
         p_can_handler = mp.Process(target=subroutine_CAN_handler, args=(send_child_conn,))
-        p_actuator_pressure_updater = mp.Process(target=subroutine_send_can_messages, args=(send_parent_conn,))
 
         p_can_handler.start()
-        p_actuator_pressure_updater.start()
 
-        console()  # Run the main console function
+        console(send_parent_conn)  # Run the main console function
 
         p_can_handler.terminate()
-        p_actuator_pressure_updater.terminate()
 
         p_can_handler.join()
-        p_actuator_pressure_updater.join()  
 
     except Exception as e:
         print(f"An error occurred: {e}")
