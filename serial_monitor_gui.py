@@ -1,5 +1,4 @@
-import pygame
-import pygame_gui
+
 from collections import deque
 import random
 import time
@@ -9,8 +8,13 @@ import serial.tools.list_ports
 import os
 import re
 
+import pygame
+import pygame_gui
+
 from pygame_gui import UIManager, PackageResource
 
+from pygame_gui.elements import ui_horizontal_slider
+from pygame_gui.elements import UI2DSlider
 from pygame_gui.elements import UIButton
 from pygame_gui.elements import UITextEntryLine
 from pygame_gui.elements import UIDropDownMenu
@@ -57,7 +61,8 @@ class OptionsUIApp:
                                        {'name': 'fira_code', 'point_size': 14, 'style': 'bold'}
                                        ])
 
-        
+        self.test_hslider = None
+        self.test_slider = None
         self.test_drop_down = None
 
         self.serial_monitor_mode_header_textbox = None
@@ -93,6 +98,26 @@ class OptionsUIApp:
         current_resolution_string = (str(self.options.resolution[0]) +
                                      'x' +
                                      str(self.options.resolution[1]))
+        
+        self.test_hslider = ui_horizontal_slider.UIHorizontalSlider(pygame.Rect((int(self.options.resolution[0] * 0.01),
+                                                                                int(self.options.resolution[1] * 0.01) + int(self.options.resolution[1] / 16 * 4)),
+                                                                               (int(self.options.resolution[0] / 4),
+                                                                                int(self.options.resolution[1] / 32))),
+                                                                    start_value=0.5,
+                                                                    value_range=(0, 1),
+                                                                    manager=self.ui_manager)
+        
+
+        self.test_slider = UI2DSlider(pygame.Rect((int(self.options.resolution[0] * 0.01),
+                                                  int(self.options.resolution[1] * 0.01) + int(self.options.resolution[1] / 16 * 2)),
+                                                 (int(self.options.resolution[0] / 4),
+                                                  int(self.options.resolution[1] / 16))),
+                                      start_value_x=0.5,
+                                      start_value_y=0.5,
+                                      value_range_x=(0, 1),
+                                      value_range_y=(0, 1),
+                                      manager=self.ui_manager)
+        
         self.test_drop_down = UIDropDownMenu(options_list=['1024x768', '1200x800', '1440x800', '1600x900', '800x600', '600x800'],
                                              starting_option=current_resolution_string,
                                              relative_rect = pygame.Rect((int(self.options.resolution[0] * 0.01),
