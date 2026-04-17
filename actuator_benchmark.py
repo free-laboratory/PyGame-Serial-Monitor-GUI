@@ -1,8 +1,11 @@
 """
 Actuator Benchmark Test Script
 
-This script performs a staircase pressure test on actuators:
-- Pressure sequence: 1000 -> 1500 -> 2000 -> 2500 -> 3000 -> 2500 -> 2000 -> 1500 -> 1000
+This script performs pressure benchmark tests on actuators:
+- Staircase profile
+- Large-jump profile
+- Sine-wave profile
+- Random-wave profile (slew-rate limited)
 - Automatically starts recording at the beginning of the test
 - Automatically stops recording at the end of the test
 - Can test individual actuators or all actuators simultaneously
@@ -23,9 +26,134 @@ from canbus import (
 )
 
 
-def staircase_pressure_test(send_parent_conn, mp_ctrl, actuator_ids=None, hold_duration=3.0):
+def _build_actuator_command_package(actuator_ids, target_pressure, run_flag=0x01):
+    """Build CAN command package for all actuators using one target pressure."""
+    actuator_command_package = []
+    for aid in gvar_can.actuator_id_list:
+        if aid in actuator_ids:
+            actuator_command_package.append([int(target_pressure), 0xFFFF, run_flag, aid])
+        else:
+            actuator_command_package.append([0, 0xFFFF, 0x00, aid])
+    return actuator_command_package
+
+
+def _execute_continuous_sine_wave(
+    send_parent_conn,
+    actuator_ids,
+    min_pressure=900,
+    max_pressure=3200,
+    cycles=2,
+    frequency_hz=0.5,
+    update_interval=0.05,
+):
+    """Execute a smooth sine wave by rapidly updating target pressure."""
+    print("\n--- STARTING SINE WAVE TEST (CONTINUOUS) ---\n")
+
+    center = (max_pressure + min_pressure) / 2.0
+    amplitude = (max_pressure - min_pressure) / 2.0
+    total_duration = cycles / frequency_hz
+
+    start_time = time.perf_counter()
+    next_report = start_time
+    report_period = max(1.0, total_duration / 10.0)
+
+    while True:
+        now = time.perf_counter()
+        elapsed = now - start_time
+        if elapsed >= total_duration:
+            break
+
+        angle = 2 * np.pi * frequency_hz * elapsed
+        target_pressure = int(round(center + amplitude * np.sin(angle)))
+        target_pressure = int(np.clip(target_pressure, min_pressure, max_pressure))
+
+        send_parent_conn.send(_build_actuator_command_package(actuator_ids, target_pressure, run_flag=0x01))
+
+        if now >= next_report:
+            completion = min(100.0, (elapsed / total_duration) * 100.0)
+            print(
+                f"SINE WAVE TEST: {completion:5.1f}% "
+                f"(target={target_pressure}, update={update_interval:.3f}s)"
+            )
+            next_report = now + report_period
+
+        time.sleep(update_interval)
+
+    print("\n--- SINE WAVE TEST COMPLETED ---")
+
+
+def _execute_random_wave_slew_limited(
+    send_parent_conn,
+    actuator_ids,
+    min_pressure=900,
+    max_pressure=3200,
+    duration=8.0,
+    update_interval=0.05,
+    retarget_interval=0.35,
+    max_slew_rate=1200.0,
+):
+    """Execute random target updates while enforcing a bounded pressure slew rate."""
+    print("\n--- STARTING RANDOM WAVE TEST (SLEW-LIMITED) ---\n")
+
+    rng = np.random.default_rng()
+    current_pressure = (max_pressure + min_pressure) / 2.0
+    desired_pressure = current_pressure
+
+    start_time = time.perf_counter()
+    last_time = start_time
+    next_retarget = start_time
+    next_report = start_time
+    report_period = max(1.0, duration / 10.0)
+
+    while True:
+        now = time.perf_counter()
+        elapsed = now - start_time
+        if elapsed >= duration:
+            break
+
+        if now >= next_retarget:
+            desired_pressure = float(rng.integers(min_pressure, max_pressure + 1))
+            next_retarget = now + retarget_interval
+
+        dt = max(now - last_time, 1e-3)
+        max_delta = max_slew_rate * dt
+        delta = desired_pressure - current_pressure
+        if abs(delta) > max_delta:
+            current_pressure += np.sign(delta) * max_delta
+        else:
+            current_pressure = desired_pressure
+
+        target_pressure = int(np.clip(round(current_pressure), min_pressure, max_pressure))
+        send_parent_conn.send(_build_actuator_command_package(actuator_ids, target_pressure, run_flag=0x01))
+
+        if now >= next_report:
+            completion = min(100.0, (elapsed / duration) * 100.0)
+            print(
+                f"RANDOM WAVE TEST: {completion:5.1f}% "
+                f"(target={target_pressure}, desired={int(round(desired_pressure))}, "
+                f"slew_limit={max_slew_rate:.0f}/s)"
+            )
+            next_report = now + report_period
+
+        last_time = now
+        time.sleep(update_interval)
+
+    print("\n--- RANDOM WAVE TEST COMPLETED ---")
+
+
+def _execute_pressure_sequence(send_parent_conn, actuator_ids, pressure_sequence, hold_duration, phase_name):
+    """Execute one pressure profile phase."""
+    print(f"\n--- STARTING {phase_name} ---\n")
+    for i, target_pressure in enumerate(pressure_sequence):
+        print(f"{phase_name} Step {i+1}/{len(pressure_sequence)}: Setting pressure to {target_pressure}")
+        send_parent_conn.send(_build_actuator_command_package(actuator_ids, target_pressure, run_flag=0x01))
+        time.sleep(hold_duration)
+    print(f"\n--- {phase_name} COMPLETED ---")
+
+
+def comprehensive_pressure_test(send_parent_conn, mp_ctrl, actuator_ids=None, hold_duration=1.0):
     """
-    Execute a staircase pressure test on specified actuators.
+    Execute a comprehensive pressure benchmark on specified actuators.
     
     Parameters:
     -----------
@@ -36,38 +164,64 @@ def staircase_pressure_test(send_parent_conn, mp_ctrl, actuator_ids=None, hold_d
     actuator_ids : list of int, optional
         List of actuator IDs to test. If None, tests all actuators.
     hold_duration : float
-        Duration in seconds to hold each pressure level
+        Base duration in seconds used to scale phase timing
     """
     try:
-        # Define the staircase pressure sequence
-        pressure_sequence = [1200, 1600, 1900, 2400, 3200, 2800, 2400, 1900, 1300, 900]
+        staircase_sequence = [1200, 1600, 1900, 2400, 3200, 2800, 2400, 1900, 1300, 900]
+        large_jump_sequence = [1000, 3200, 1000, 3200, 900, 3000, 1200, 3200, 1000]
+
+        # Faster timing for comprehensive stress testing.
+        staircase_hold = max(0.25, hold_duration * 0.40)
+        jump_hold = max(0.30, hold_duration * 0.44)
+        sine_update_interval = max(0.02, min(0.10, hold_duration * 0.04))
+        sine_frequency_hz = 0.6 / 1.5
+        sine_cycles = 3
+        sine_duration = sine_cycles / sine_frequency_hz
+        random_update_interval = sine_update_interval
+        random_duration = max(6.0, sine_duration)
+        random_retarget_interval = max(0.25, hold_duration * 0.20)
+        random_max_slew_rate = 1200.0
+
+        test_phases = [
+            ("STAIRCASE TEST", staircase_sequence, staircase_hold),
+            ("LARGE JUMP TEST", large_jump_sequence, jump_hold),
+        ]
+        total_duration = (
+            sum(len(seq) * phase_hold for _, seq, phase_hold in test_phases)
+            + sine_duration
+            + random_duration
+        )
         
         # Use all actuators if none specified
         if actuator_ids is None:
             actuator_ids = gvar_can.actuator_id_list
         
         print("=" * 80)
-        print("ACTUATOR STAIRCASE PRESSURE TEST")
+        print("ACTUATOR COMPREHENSIVE PRESSURE TEST")
         print("=" * 80)
         print(f"Testing actuators: {[hex(aid) for aid in actuator_ids]}")
-        print(f"Pressure sequence: {pressure_sequence}")
-        print(f"Hold duration per level: {hold_duration} seconds")
-        print(f"Total test duration: ~{len(pressure_sequence) * hold_duration:.1f} seconds")
+        print("Test phases:")
+        for phase_name, sequence, phase_hold in test_phases:
+            print(
+                f"  - {phase_name}: {len(sequence)} steps, "
+                f"hold={phase_hold:.2f}s, range={min(sequence)}-{max(sequence)}"
+            )
+        print(
+            f"  - SINE WAVE TEST: continuous, duration={sine_duration:.1f}s, "
+            f"frequency={sine_frequency_hz:.2f}Hz, update={sine_update_interval:.3f}s"
+        )
+        print(
+            f"  - RANDOM WAVE TEST: continuous, duration={random_duration:.1f}s, "
+            f"retarget={random_retarget_interval:.2f}s, update={random_update_interval:.3f}s, "
+            f"slew_limit={random_max_slew_rate:.0f}/s"
+        )
+        print(f"Estimated active test duration: ~{total_duration:.1f} seconds")
         print("=" * 80)
         
         # Wait a moment before starting
         print("\nInitializing actuators to starting pressure (1000)...")
         initial_pressure = 1000
-        actuator_command_package = []
-        for aid in gvar_can.actuator_id_list:
-            if aid in actuator_ids:
-                # Set test actuators to initial pressure with control byte 0x01 (running)
-                actuator_command_package.append([initial_pressure, 0xFFFF, 0x01, aid])
-            else:
-                # Keep other actuators stopped
-                actuator_command_package.append([0, 0xFFFF, 0x00, aid])
-        
-        send_parent_conn.send(actuator_command_package)
+        send_parent_conn.send(_build_actuator_command_package(actuator_ids, initial_pressure, run_flag=0x01))
         time.sleep(2)
         
         # Start recording
@@ -76,27 +230,37 @@ def staircase_pressure_test(send_parent_conn, mp_ctrl, actuator_ids=None, hold_d
         mp_ctrl[gvar_can.mp_ctrl_stop_recording] = 0
         time.sleep(0.5)
         
-        # Execute the staircase test
-        print("\n--- STARTING STAIRCASE TEST ---\n")
-        for i, target_pressure in enumerate(pressure_sequence):
-            print(f"Step {i+1}/{len(pressure_sequence)}: Setting pressure to {target_pressure}")
-            
-            # Create command package
-            actuator_command_package = []
-            for aid in gvar_can.actuator_id_list:
-                if aid in actuator_ids:
-                    # Set test actuators to target pressure
-                    actuator_command_package.append([target_pressure, 0xFFFF, 0x01, aid])
-                else:
-                    # Keep other actuators stopped
-                    actuator_command_package.append([0, 0xFFFF, 0x00, aid])
-            
-            send_parent_conn.send(actuator_command_package)
-            
-            # Hold at this pressure level
-            time.sleep(hold_duration)
-        
-        print("\n--- STAIRCASE TEST COMPLETED ---")
+        # Execute all test phases in one continuous recording
+        for phase_index, (phase_name, sequence, phase_hold) in enumerate(test_phases):
+            _execute_pressure_sequence(send_parent_conn, actuator_ids, sequence, phase_hold, phase_name)
+            print("Stabilizing at baseline pressure (1000) before next phase...")
+            send_parent_conn.send(_build_actuator_command_package(actuator_ids, 1000, run_flag=0x01))
+            time.sleep(0.35)
+
+        _execute_continuous_sine_wave(
+            send_parent_conn,
+            actuator_ids,
+            min_pressure=900,
+            max_pressure=3200,
+            cycles=sine_cycles,
+            frequency_hz=sine_frequency_hz,
+            update_interval=sine_update_interval,
+        )
+
+        print("Stabilizing at baseline pressure (1000) before random wave phase...")
+        send_parent_conn.send(_build_actuator_command_package(actuator_ids, 1000, run_flag=0x01))
+        time.sleep(0.35)
+
+        _execute_random_wave_slew_limited(
+            send_parent_conn,
+            actuator_ids,
+            min_pressure=900,
+            max_pressure=3200,
+            duration=random_duration,
+            update_interval=random_update_interval,
+            retarget_interval=random_retarget_interval,
+            max_slew_rate=random_max_slew_rate,
+        )
         
         # Return to safe pressure
         print("\nReturning actuators to safe pressure (1000)...")
@@ -117,12 +281,57 @@ def staircase_pressure_test(send_parent_conn, mp_ctrl, actuator_ids=None, hold_d
         print("=" * 80)
         
     except Exception as e:
-        print(f"Error in staircase pressure test: {e}")
+        print(f"Error in comprehensive pressure test: {e}")
         # Make sure to stop recording even if there's an error
         mp_ctrl[gvar_can.mp_ctrl_stop_recording] = 1
 
 
-def run_benchmark(actuator_numbers=None, hold_duration=3.0):
+def staircase_pressure_test(send_parent_conn, mp_ctrl, actuator_ids=None, hold_duration=3.0):
+    """Backward-compatible staircase-only test entry point."""
+    try:
+        sequence = [1200, 1600, 1900, 2400, 3200, 2800, 2400, 1900, 1300, 900]
+
+        if actuator_ids is None:
+            actuator_ids = gvar_can.actuator_id_list
+
+        print("=" * 80)
+        print("ACTUATOR STAIRCASE PRESSURE TEST")
+        print("=" * 80)
+        print(f"Testing actuators: {[hex(aid) for aid in actuator_ids]}")
+        print(f"Pressure sequence: {sequence}")
+        print(f"Hold duration per level: {hold_duration} seconds")
+        print(f"Total test duration: ~{len(sequence) * hold_duration:.1f} seconds")
+        print("=" * 80)
+
+        send_parent_conn.send(_build_actuator_command_package(actuator_ids, 1000, run_flag=0x01))
+        time.sleep(2)
+
+        print("\n--- STARTING RECORDING ---")
+        mp_ctrl[gvar_can.mp_ctrl_start_recording] = 1
+        mp_ctrl[gvar_can.mp_ctrl_stop_recording] = 0
+        time.sleep(0.5)
+
+        _execute_pressure_sequence(send_parent_conn, actuator_ids, sequence, hold_duration, "STAIRCASE TEST")
+
+        print("\nReturning actuators to safe pressure (1000)...")
+        send_parent_conn.send(_build_actuator_command_package(actuator_ids, 1000, run_flag=0x00))
+        time.sleep(1)
+
+        print("\n--- STOPPING RECORDING ---")
+        mp_ctrl[gvar_can.mp_ctrl_stop_recording] = 1
+        time.sleep(1)
+
+        print("\n" + "=" * 80)
+        print("STAIRCASE TEST COMPLETED SUCCESSFULLY!")
+        print("Data has been saved to the datalog folder.")
+        print("=" * 80)
+
+    except Exception as e:
+        print(f"Error in staircase pressure test: {e}")
+        mp_ctrl[gvar_can.mp_ctrl_stop_recording] = 1
+
+
+def run_benchmark(actuator_numbers=None, hold_duration=1.0):
     """
     Run the complete benchmark test.
     
@@ -132,7 +341,7 @@ def run_benchmark(actuator_numbers=None, hold_duration=3.0):
         List of actuator numbers (1-24) to test. If None, tests only actuator 1.
         Example: [1, 2, 3] tests actuators 0x101, 0x102, 0x103
     hold_duration : float
-        Duration in seconds to hold each pressure level (default: 3.0)
+        Base duration in seconds used to scale faster pressure timing (default: 1.0)
     """
     # Convert actuator numbers to IDs
     if actuator_numbers is None:
@@ -199,8 +408,8 @@ def run_benchmark(actuator_numbers=None, hold_duration=3.0):
         # Wait for processes to initialize
         time.sleep(5)
         
-        # Run the staircase test
-        staircase_pressure_test(send_parent_conn, mp_ctrl, actuator_ids, hold_duration)
+        # Run the comprehensive multi-profile benchmark
+        comprehensive_pressure_test(send_parent_conn, mp_ctrl, actuator_ids, hold_duration)
         
         # Wait a moment for data to flush
         time.sleep(2)
@@ -248,5 +457,5 @@ if __name__ == "__main__":
     run_benchmark(actuator_numbers=list(range(1, 25)), hold_duration=3.0)
     """
     
-    # Default: Test actuator 1 with 3 second hold at each pressure level
-    run_benchmark(actuator_numbers=[8], hold_duration=3.0)
+    # Default: Test actuator 2 with faster comprehensive timing
+    run_benchmark(actuator_numbers=[2], hold_duration=1.0)

@@ -433,7 +433,7 @@ def subroutine_CAN_handler(send_child_conn, mp_actuator_status ,mp_actuator_t_p_
                 actuator_ctrl = int(control_byte)
                 canmsg = create_canmsg_pressure_to_actuator(actuator_id=aid, p=p_value, pdot_inlet=pdot_value, pdot_outlet=0xFFFF, control_byte=actuator_ctrl)
                 bus.send(canmsg)
-                # time.sleep(0.001) # small delay to avoid flooding the bus
+                time.sleep(0.001) # small delay to avoid flooding the bus
 
             # logging data for all actuators
             if mp_ctrl[gvar_can.mp_ctrl_start_recording] == 1:

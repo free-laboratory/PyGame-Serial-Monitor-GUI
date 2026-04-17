@@ -208,7 +208,7 @@ if __name__ == "__main__":
         # Plot actuator 1 from the newest file
         newest_file = os.path.join(datalog_folder, files[0])
         print(f"Plotting data from: {newest_file}")
-        actuator_pressure_plotter(newest_file, actuator_number=8)
+        actuator_pressure_plotter(newest_file, actuator_number=2)
         
         # Uncomment below to use the multi_data_plotter for comparison
         # newest_files = [os.path.join(datalog_folder, f) for f in files[:2]]

@@ -12,7 +12,7 @@ MSG_NACK  = 0xFF
 FRAMES_PER_BLOCK = 128
 DATA_PER_FRAME   = 7
 
-COMPORT = 'COM31'  # Update this to your CAN adapter's port
+COMPORT = 'COM3'  # Update this to your CAN adapter's port
 
 def wait_for_ack(bus, stat_id, timeout=2.0):
     """Listens on the CAN bus for an ACK or NACK from the ESP32."""
