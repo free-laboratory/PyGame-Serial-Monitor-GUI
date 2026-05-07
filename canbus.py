@@ -309,7 +309,7 @@ def subroutine_CAN_handler(send_child_conn, mp_actuator_status ,mp_actuator_t_p_
         # try connection until success
         while bus is None:
             try:
-                bus = can.interface.Bus(bustype='slcan', channel=COMPORT, bitrate=1000000)
+                bus = gvar_can.open_slcan_bus(COMPORT)
             except Exception as e:
                 print(f"Failed to connect to CAN bus: {e}. Retrying in 2 seconds...")
                 time.sleep(2)
@@ -1096,7 +1096,7 @@ if __name__ == "__main__":
     print("Connecting to CAN bus...")
     while bus is None:
         try:
-            bus = can.interface.Bus(bustype='slcan', channel=COMPORT, bitrate=1000000)
+            bus = gvar_can.open_slcan_bus(COMPORT)
         except Exception as e:
             print(f"Failed to connect to CAN bus: {e}. Retrying in 2 seconds...")
             time.sleep(2)

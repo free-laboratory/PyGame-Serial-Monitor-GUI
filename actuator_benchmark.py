@@ -11,7 +11,6 @@ This script performs pressure benchmark tests on actuators:
 - Can test individual actuators or all actuators simultaneously
 """
 
-import can
 import time
 import datetime
 import multiprocessing as mp
@@ -373,7 +372,7 @@ def run_benchmark(actuator_numbers=None, hold_duration=1.0):
     bus = None
     while bus is None:
         try:
-            bus = can.interface.Bus(bustype='slcan', channel=COMPORT, bitrate=1000000)
+            bus = gvar_can.open_slcan_bus(COMPORT)
             print(f"Successfully connected to CAN bus on {COMPORT}")
         except Exception as e:
             print(f"Failed to connect to CAN bus: {e}. Retrying in 2 seconds...")

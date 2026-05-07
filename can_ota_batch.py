@@ -3,8 +3,7 @@ import sys
 import time
 from typing import Iterable, List
 
-import can
-
+import gvar_can
 import ota
 
 
@@ -57,8 +56,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--bitrate",
         type=int,
-        default=1000000,
-        help="CAN bitrate (default: 1000000)",
+        default=gvar_can.CAN_BITRATE,
+        help=f"CAN bitrate (default: {gvar_can.CAN_BITRATE})",
+    )
+    parser.add_argument(
+        "--tty-baudrate",
+        type=int,
+        default=gvar_can.SLCAN_TTY_BAUDRATE,
+        help=f"SLCAN serial baudrate (default: {gvar_can.SLCAN_TTY_BAUDRATE})",
     )
     parser.add_argument(
         "--delay",
@@ -87,7 +92,11 @@ def main(actuator_ids: List[int]) -> int:
     print("Targets:", ", ".join(hex(aid) for aid in actuator_ids))
 
     try:
-        bus = can.interface.Bus(bustype="slcan", channel=args.port, bitrate=args.bitrate)
+        bus = gvar_can.open_slcan_bus(
+            args.port,
+            bitrate=args.bitrate,
+            tty_baudrate=args.tty_baudrate,
+        )
     except Exception as exc:
         print(f"[ERROR] Could not open CAN bus on {args.port}: {exc}")
         return 2
@@ -124,5 +133,6 @@ def main(actuator_ids: List[int]) -> int:
 
 if __name__ == "__main__":
     # Edit this list for your target actuators.
-    target_ids = parse_can_id_list(["0x101", "0x102", "0x103", "0x104","0x105", "0x106", "0x107", "0x108"])
+    # target_ids = parse_can_id_list(["0x101", "0x102", "0x103", "0x104","0x105", "0x106", "0x107", "0x108"])
+    target_ids = parse_can_id_list(["0x104"])
     sys.exit(main(target_ids))

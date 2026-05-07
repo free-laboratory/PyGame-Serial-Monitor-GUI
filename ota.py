@@ -3,6 +3,8 @@ import time
 import os
 import math
 
+import gvar_can
+
 # --- OTA PROTOCOL DEFINITIONS ---
 CMD_START = 0x01
 CMD_END   = 0x02
@@ -12,7 +14,7 @@ MSG_NACK  = 0xFF
 FRAMES_PER_BLOCK = 128
 DATA_PER_FRAME   = 7
 
-COMPORT = 'COM3'  # Update this to your CAN adapter's port
+COMPORT = 'COM31'  # Update this to your CAN adapter's port
 
 def wait_for_ack(bus, stat_id, timeout=2.0):
     """Listens on the CAN bus for an ACK or NACK from the ESP32."""
@@ -116,7 +118,7 @@ def perform_can_ota_on_bus(bus, device_can_id, bin_filepath, log_fn=print):
 def perform_can_ota(device_can_id, bin_filepath):
     """Standalone OTA wrapper that opens/closes the CAN bus."""
     try:
-        bus = can.interface.Bus(bustype='slcan', channel=COMPORT, bitrate=1000000)
+        bus = gvar_can.open_slcan_bus(COMPORT)
     except Exception as e:
         print(f"[ERROR] Could not open CAN bus: {e}")
         return False

@@ -1,6 +1,8 @@
 import can
 import time
 
+import gvar_can
+
 CMD_SET_ID = 0x05
 MSG_ACK    = 0xAA
 
@@ -15,7 +17,7 @@ def change_device_id(current_id, new_id):
 
     try:
         # Update bustype/channel for your hardware
-        bus = can.interface.Bus(bustype='slcan', channel=COMPORT, bitrate=1000000)
+        bus = gvar_can.open_slcan_bus(COMPORT)
     except Exception as e:
         print(f"[ERROR] Could not open CAN bus: {e}")
         return

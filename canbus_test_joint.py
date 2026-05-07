@@ -238,7 +238,7 @@ def subroutine_CAN_handler(send_child_conn, mp_actuator_t_p_pdot, mp_ctrl, mp_jo
         bus = None
         while bus is None:
             try:
-                bus = can.interface.Bus(bustype='slcan', channel='COM3', bitrate=1000000)
+                bus = gvar_can.open_slcan_bus('COM3')
             except Exception as e:
                 print(f"Failed to connect to CAN bus: {e}. Retrying in 2 seconds...")
                 time.sleep(2)

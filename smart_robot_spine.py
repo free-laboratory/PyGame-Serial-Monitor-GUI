@@ -33,7 +33,7 @@ import re
 import queue
 from scipy.spatial.transform import Rotation
 # Serial port configuration
-SERIAL_PORT = 'COM10'  # Change this to your serial port
+SERIAL_PORT = 'COM12'  # Change this to your serial port
 BAUD_RATE = 115200
 READ_INTERVAL = 0.02  # 20 ms
 # Queue to hold incoming data
